@@ -1,4 +1,4 @@
-# QDeskWidget · DeskBox 的 Qt 移植
+# QDeskWidget
 
 ![QDeskWidget](docs/images/hero.png)
 
