@@ -2,9 +2,10 @@
 rem ============================================================
 rem  QDeskWidget - MSVC x64 Release packaging script
 rem
-rem  Output: dist\QDeskWidget\  -- a portable folder you can copy to other PCs
-rem  Layout: QDeskWidget.exe + all DLLs + plugins\ + translations\ live in the ROOT
+rem  Output: dist\QDeskWidget\  -- a portable folder you can copy to other PCs (~34MB)
+rem  Layout: QDeskWidget.exe + all DLLs + plugins\ live in the ROOT
 rem          (no bin\ subfolder); qt.conf (Prefix = .) tells Qt where the plugins are.
+rem          No translations\ -- the app has no QTranslator, see the TRIM block below.
 rem
 rem  Usage:
 rem    package-msvc.bat           build package
@@ -64,10 +65,15 @@ if not "%CRTDIR%"=="" (
     copy /y "%CRTDIR%\*.dll" "%BIN%\" >nul
 )
 
-rem UCRT: from the Windows SDK redist (path uses the SDK version)
+rem UCRT: from the Windows SDK redist (path uses the SDK version).
+rem The app requires Win10+, so ucrtbase.dll and the api-ms-win-* apiset stubs are
+rem resolved by the OS. Copying the whole SDK folder would drop 45 api-ms-win-*.dll
+rem plus a 1.4MB ucrtbase.dll into the package for nothing.
 set "UCRTDIR=%SDK%\Redist\%SDKVER%\ucrt\DLLs\x64"
 if exist "%UCRTDIR%" (
     copy /y "%UCRTDIR%\*.dll" "%BIN%\" >nul
+    del /q "%BIN%\api-ms-win-*.dll" 2>nul
+    del /q "%BIN%\ucrtbase.dll" 2>nul
 )
 
 rem Flatten: if CMake installed the exe into a bin\ subfolder, move everything
@@ -77,6 +83,38 @@ if exist "%DIST%\bin" (
     move /y "%DIST%\bin\*" "%DIST%\" >nul
     rmdir /q "%DIST%\bin" >nul 2>&1
 )
+
+rem ---------------------------------------------------------------------------
+rem TRIM: drop Qt payload this app never loads -- 81MB -> ~34MB.
+rem
+rem Verified by deleting exactly these from a copy of the package and running
+rem   QDeskWidget.exe --grab <dir>   three times
+rem (music box with JPEG cover art / hello-clock plugin / weather: SVG icons + HTTPS),
+rem all rendering correctly.
+rem
+rem   opengl32sw.dll, dxcompiler.dll, dxil.dll, D3Dcompiler_47.dll
+rem       Only used by QOpenGL and the Qt Quick RHI backends. This app paints with
+rem       QPainter (raster engine) and links no QtOpenGL/QtQuick module at all.
+rem   translations\
+rem       No QTranslator is ever installed; every string is a hard-coded zh_CN literal.
+rem   plugins\generic\qtuiotouchplugin.dll
+rem       Windows touch injection; the UI has no touch handling.
+rem   plugins\tls\qcertonlybackend.dll
+rem       qschannelbackend is the active backend on Windows; cert-only is unused.
+rem   plugins\imageformats\{qtiff,qtga,qwbmp,qicns}.dll
+rem       Assets are png/jpg/ico/svg only. Keep qjpeg -- NetEase cover art is JPEG.
+rem
+rem Done here instead of relying solely on the windeployqt flags set in
+rem CMakeLists.txt: the deploy script is generated at configure time, so a
+rem pre-existing build directory would keep running the stale one.
+rem ---------------------------------------------------------------------------
+echo === trim unused Qt payload ===
+del /q "%DIST%\opengl32sw.dll" "%DIST%\dxcompiler.dll" "%DIST%\dxil.dll" "%DIST%\D3Dcompiler_47.dll" 2>nul
+if exist "%DIST%\translations" rmdir /s /q "%DIST%\translations"
+del /q "%DIST%\plugins\generic\qtuiotouchplugin.dll" 2>nul
+if exist "%DIST%\plugins\generic" rmdir /q "%DIST%\plugins\generic" 2>nul
+del /q "%DIST%\plugins\tls\qcertonlybackend.dll" 2>nul
+del /q "%DIST%\plugins\imageformats\qtiff.dll" "%DIST%\plugins\imageformats\qtga.dll" "%DIST%\plugins\imageformats\qwbmp.dll" "%DIST%\plugins\imageformats\qicns.dll" 2>nul
 
 rem Ensure qt.conf points Qt's plugin search to the package root (Prefix = .).
 echo === fix qt.conf (Prefix = .) ===

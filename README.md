@@ -38,6 +38,9 @@ cmake --build build/mingw
   （用户无需装 vc_redist）全部平铺在包根目录，`qt.conf` 指向同级的 `plugins\`，
   整个文件夹拷到别的机器即可运行。数据目录 `<exe 同目录>\QDeskWidget\` 随包走，
   便携形态。
+  打包脚本会剪掉程序用不到的 Qt 负载（软件 OpenGL、D3D 着色器编译器、多语言翻译、
+  未使用的图片格式与触摸插件），**整包约 34MB**；`icuuc.dll` 虽小但被 Qt6Core 依赖，
+  不可删。
 
 ---
 

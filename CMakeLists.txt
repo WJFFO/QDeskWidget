@@ -163,9 +163,23 @@ install(TARGETS QDeskWidget
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
+# Only deploy what the app actually loads.
+#   --no-translations        -- no QTranslator is installed; UI strings are hard-coded zh_CN
+#   --no-opengl-sw           -- QPainter raster painting, no QOpenGL/QQuick anywhere
+#   --no-system-d3d-compiler -- D3DCompiler is only pulled in by the Qt Quick RHI backends
+# NOTE: pass all three through DEPLOY_TOOL_OPTIONS instead of using the NO_TRANSLATIONS
+# keyword -- Qt's macro appends that keyword as a bare string and the tool options as a
+# list, so combining the two emits a malformed ";DEPLOY_TOOL_OPTIONS;..." argument.
+# windeployqt has no switch for dxcompiler.dll / dxil.dll (still deployed unconditionally),
+# so those -- plus the SDK's api-ms-win-* apiset stubs -- are removed by the TRIM block in
+# package-msvc.bat.
 qt_generate_deploy_app_script(
     TARGET QDeskWidget
     OUTPUT_SCRIPT deploy_script
     NO_UNSUPPORTED_PLATFORM_ERROR
+    DEPLOY_TOOL_OPTIONS
+        --no-translations
+        --no-opengl-sw
+        --no-system-d3d-compiler
 )
 install(SCRIPT ${deploy_script})
