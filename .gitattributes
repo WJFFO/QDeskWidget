@@ -1,0 +1,20 @@
+# 统一换行：仓库内一律 LF，检出时按平台自动转换
+* text=auto eol=lf
+
+# 源码显式按文本处理（避免被误判）
+*.cpp   text eol=lf
+*.h     text eol=lf
+*.cmake text eol=lf
+*.txt   text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.bat   text eol=crlf
+*.svg   text eol=lf
+
+# 二进制资源
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.icns binary
+*.dll  binary
+*.exe  binary

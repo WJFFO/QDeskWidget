@@ -1,0 +1,6 @@
+// Embedded application icon for the executable.
+// Shows in Explorer, shortcuts and (when no window icon is set) the taskbar.
+// Keep comments ASCII-only: rc.exe reads this file in the system codepage.
+#include <windows.h>
+
+IDI_ICON1 ICON "qdw.ico"

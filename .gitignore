@@ -1,0 +1,50 @@
+# ---------- 构建产物 ----------
+build/
+build-*/
+dist/
+out/
+cmake-build-*/
+*.user
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# ---------- Qt / 打包生成的运行库（由 windeployqt 产出，不入库） ----------
+# 只有 dist/ 与 <exe>/QDeskWidget/ 下会有这些，随 dist/ 一并排除
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.obj
+*.o
+*.tlog
+*.log
+*.stamp
+
+# ---------- 运行时数据目录（便携数据，不入库） ----------
+QDeskWidget/
+# 仅允许源码树里的同名概念目录（无）
+
+# ---------- IDE / 本地配置 ----------
+.qtcreator/
+.vs/
+.vscode/
+*.pro.user
+*.qmlproject.user
+
+# ---------- 内部工作区（会话记忆、设计画布） ----------
+.workbuddy/
+*.miora
+
+# ---------- 内部验证截图（QA 证据，非文档配图） ----------
+docs/verify-*/
+
+# ---------- 系统垃圾 ----------
+Thumbs.db
+Desktop.ini
+.DS_Store
+*~
+*.swp
