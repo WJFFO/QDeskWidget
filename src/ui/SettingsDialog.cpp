@@ -15,6 +15,7 @@
 #include "core/Paths.h"
 #include "core/ShellActions.h"
 #include "mrowlayout.h"
+#include "platform/Autostart.h"
 #include "platform/Platform.h"
 #include "ui/UiStyle.h"
 #include "widgets/WidgetRegistry.h"
@@ -218,8 +219,8 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     setAttribute(Qt::WA_TranslucentBackground, true);
 
     UiStyle::styleDialog(this, /*translucent=*/true);
-    // 最小 520×660：本面板没有套 QScrollArea，再小内容就会被挤压
-    setMinimumSize(520, 660);
+    // 最小 520×700：本面板没有套 QScrollArea，再小内容就会被挤压
+    setMinimumSize(520, 700);
 
     // 滑块专用：拖动期间把连发的变更合并成 33ms 一次（约 30fps）的应用，
     // 停手 350ms 后才真正落盘。两个定时器都是单次，每次变更重新压满。
@@ -290,17 +291,16 @@ void SettingsDialog::buildUi()
                            QStringLiteral("纯色半透明") });
     appearance->ColumnAddWidget(UiStyle::formRow(this, QStringLiteral("材质"), m_material));
 
-    auto *materialHint = new QLabel(this);
-    materialHint->setObjectName(QStringLiteral("hint"));
-    materialHint->setFont(st.uiFont(11));
-    materialHint->setWordWrap(true);
-    // 提示文案在构造时按系统能力定一次：老系统上即便选「云母」也只会得到亚克力效果，
-    // 这里提前说清，免得用户以为设置没生效
-    materialHint->setText(Platform::supportsMica()
-                              ? QStringLiteral("云母：更薄、更接近壁纸色调的背板，适合浅色主题；"
-                                               "亚克力：对窗口背后做实时模糊，层次更强。")
-                              : QStringLiteral("当前系统低于 Windows 11 22H2，云母会自动按亚克力渲染。"));
-    appearance->ColumnAddWidget(materialHint);
+    // 老系统上即便选「云母」也只会得到亚克力效果，这种情况才提示；
+    // 云母 / 亚克力的观感差异说明不占版面（下拉框里的名字已经够用了）
+    if (!Platform::supportsMica()) {
+        auto *materialHint = new QLabel(this);
+        materialHint->setObjectName(QStringLiteral("hint"));
+        materialHint->setFont(st.uiFont(11));
+        materialHint->setWordWrap(true);
+        materialHint->setText(QStringLiteral("当前系统低于 Windows 11 22H2，云母会自动按亚克力渲染。"));
+        appearance->ColumnAddWidget(materialHint);
+    }
 
     m_opacity = new QSlider(Qt::Horizontal, this);
     // 滑杆下限 20：再低盒子就几乎看不见了，属误操作区间（存储层允许到 10，这里故意不放开）
@@ -349,14 +349,8 @@ void SettingsDialog::buildUi()
         widgets->ColumnAddWidget(row);
     }
 
-    // 选中项的说明：插件一般会写一句「这是什么」，内置组件也要有个去处，
-    // 固定两行高度，切换选项时下面的按钮不会上下跳
-    m_widgetDesc = new QLabel(this);
-    m_widgetDesc->setObjectName(QStringLiteral("hint"));
-    m_widgetDesc->setFont(st.uiFont(11));
-    m_widgetDesc->setWordWrap(true);
-    m_widgetDesc->setMinimumHeight(34);
-    widgets->ColumnAddWidget(m_widgetDesc);
+    // 选中组件的说明不单独占一行（以前是常驻两行文字，纯占高度）：
+    // 改成下拉框自己的 tooltip，鼠标停上去就能看到，版面不受影响（见 reloadWidgetTypes）
 
     {
         auto *tools = new MRowLayout(this);
@@ -424,6 +418,34 @@ void SettingsDialog::buildUi()
     behavior->ColumnAddWidget(m_snap);
     behavior->ColumnAddWidget(m_showHidden);
 
+    // 开机自启：唯一一个「写系统、不写 settings.json」的开关。
+    // 说明文字不再常驻（只当错误提示位用），平时这一行就只有开关本身
+    m_autoStart = new QCheckBox(QStringLiteral("开机自启动"), this);
+    behavior->ColumnAddWidget(m_autoStart);
+
+    m_autoStartHint = new QLabel(this);
+    m_autoStartHint->setObjectName(QStringLiteral("hint"));
+    m_autoStartHint->setFont(st.uiFont(11));
+    m_autoStartHint->setWordWrap(true);
+    // 隐藏时布局会完全跳过它，所以「没有错误」时它不占一像素
+    m_autoStartHint->setVisible(false);
+    if (!Autostart::isSupported()) {
+        // 非 Windows 构建：开关置灰而不是隐藏，位置稳定、也解释了为什么点不动
+        m_autoStart->setEnabled(false);
+        m_autoStart->setToolTip(QStringLiteral("当前平台没有实现开机自启"));
+        m_autoStartHint->setText(QStringLiteral("当前平台不支持开机自启（仅 Windows 实现）。"));
+        m_autoStartHint->setVisible(true);
+    }
+    {
+        // 用一行容器做出 24px 缩进（勾选框方块 + spacing 的宽度），
+        // 让这段文字明显从属于上面那个开关，而不是一个新条目
+        auto *row = new MRowLayout(this);
+        row->SetMargin(24, 0, 0, 0);
+        row->RowAddWidget(m_autoStartHint, 1, Qt::AlignTop);
+        row->RowClearSpacers(); // 不清掉尾部弹簧，说明文字只有一半宽就换行了
+        behavior->ColumnAddWidget(row);
+    }
+
     root->ColumnAddWidget(behavior);
 
     // 弹簧把按钮压到底部：窗口被拉高时内容不会被拉开
@@ -460,14 +482,32 @@ void SettingsDialog::buildUi()
     connect(m_confirmDelete, &QCheckBox::toggled, this, [this](bool) { pushToSettings(); });
     connect(m_snap, &QCheckBox::toggled, this, [this](bool) { pushToSettings(); });
     connect(m_showHidden, &QCheckBox::toggled, this, [this](bool) { pushToSettings(); });
+    // 自启是个「立即产生系统副作用」的开关，不能进 pushToSettings()：
+    // 那里是 AppSettings 的全量回写，跟注册表没有关系，写多少次都不会改变启动项
+    connect(m_autoStart, &QCheckBox::toggled, this, [this](bool on)
+    {
+        if (Autostart::setEnabled(on)) {
+            m_autoStartHint->setVisible(false); // 成功就把可能的旧错误提示收起来
+            return;
+        }
+        // 失败（无权限 / 系统拒绝）：把勾恢复成真实状态，界面不能撒谎。
+        // QSignalBlocker 必须加，否则 setChecked 会再触发一次本 lambda，来回抖动
+        {
+            const QSignalBlocker block(m_autoStart);
+            m_autoStart->setChecked(Autostart::isEnabled());
+        }
+        m_autoStartHint->setText(QStringLiteral("设置失败：没能写入注册表启动项（可能被安全软件拦截），"
+                                                "开机自启保持不变。"));
+        m_autoStartHint->setVisible(true);
+    });
 
     // ---- 组件分区 ----
     connect(m_widgetAdd, &QPushButton::clicked, this, &SettingsDialog::addSelectedWidget);
     connect(m_widgetCombo, &QComboBox::currentIndexChanged, this, [this](int idx)
     {
-        // 说明文字挂在 tooltip 角色上，切选项时同步到下方那行 hint
-        m_widgetDesc->setText(idx >= 0 ? m_widgetCombo->itemData(idx, Qt::ToolTipRole).toString()
-                                       : QString());
+        // 说明文字挂在 tooltip 角色上，切选项时同步到下拉框自身的 tooltip
+        m_widgetCombo->setToolTip(idx >= 0 ? m_widgetCombo->itemData(idx, Qt::ToolTipRole).toString()
+                                           : QString());
     });
 }
 
@@ -501,9 +541,11 @@ void SettingsDialog::reloadWidgetTypes(bool rescan)
     const int n = m_widgetCombo->count();
     // 重扫后尽量停在原来选的那一项，找不到就回第 0 项
     m_widgetCombo->setCurrentIndex(n == 0 ? -1 : qBound(0, keep, n - 1));
-    m_widgetDesc->setText(n > 0 ? m_widgetCombo->itemData(m_widgetCombo->currentIndex(),
-                                                          Qt::ToolTipRole).toString()
-                                : QString());
+    // setCurrentIndex 在 blockSignals 之后仍可能因为索引没变而不发信号，这里直接同步一次 tooltip，
+    // 保证「打开面板」时就带着当前组件的说明
+    m_widgetCombo->setToolTip(n > 0 ? m_widgetCombo->itemData(m_widgetCombo->currentIndex(),
+                                                              Qt::ToolTipRole).toString()
+                                    : QString());
     m_widgetAdd->setEnabled(n > 0);
     m_widgetStatus->setText(rescan
                                 ? QStringLiteral("已重新扫描：%1 个可用组件（已在运行的插件面板需要重新添加）")
@@ -526,7 +568,7 @@ void SettingsDialog::addSelectedWidget()
     m_widgetStatus->setText(QStringLiteral("已添加「%1」，可以把它拖到想要的位置").arg(name));
 }
 
-// 灌初值。11 个 QSignalBlocker 覆盖除两个数值标签之外的全部控件：
+// 灌初值。12 个 QSignalBlocker 覆盖除两个数值标签之外的全部控件：
 // 少了任何一个，setCurrentIndex / setValue 都会触发 pushToSettings()，
 // 于是「打开设置面板」这个动作本身就会重写 settings.json 并刷新所有窗口。
 void SettingsDialog::loadValues()
@@ -534,7 +576,7 @@ void SettingsDialog::loadValues()
     const AppSettings &st = AppSettings::get();
     QSignalBlocker b1(m_theme), b2(m_material), b3(m_opacity), b4(m_iconSize),
         b5(m_nameLines), b6(m_viewMode), b7(m_sortMode), b8(m_stackGrid),
-        b9(m_confirmDelete), b10(m_snap), b11(m_showHidden);
+        b9(m_confirmDelete), b10(m_snap), b11(m_showHidden), b12(m_autoStart);
 
     m_theme->setCurrentIndex(st.theme);
     m_material->setCurrentIndex(st.material);
@@ -552,6 +594,8 @@ void SettingsDialog::loadValues()
     m_confirmDelete->setChecked(st.confirmDelete);
     m_snap->setChecked(st.snapToGrid);
     m_showHidden->setChecked(st.showHidden);
+    // 自启不在 settings.json 里，真值从注册表读：用户可能在任务管理器里直接关过
+    m_autoStart->setChecked(Autostart::isEnabled());
 }
 
 // 离散控件（下拉框 / 勾选框）的入口：应用 + 落盘 + 补一个行为信号。
@@ -565,6 +609,7 @@ void SettingsDialog::pushToSettings()
 
 // 全量回写「轻量版」：只写内存 + 让窗口重画，不落盘、不重套 QSS（除非主题真的变了）。
 // 全量覆盖而不是差量：不需要记住哪些字段被改过，字段也就十几个。
+// **开机自启不在这里**：它写的是注册表启动项，由 m_autoStart 的 toggled 单独处理（见 buildUi）。
 void SettingsDialog::applyLive()
 {
     AppSettings &st = AppSettings::get();

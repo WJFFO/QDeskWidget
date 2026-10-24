@@ -11,6 +11,8 @@
 #include "App.h"
 #include "core/AppSettings.h"
 #include "core/Paths.h"
+#include "core/ShellActions.h"
+#include "platform/Autostart.h"
 #include "platform/MediaVolume.h"
 #include "widgets/WidgetRegistry.h"
 
@@ -21,6 +23,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QIcon>
+#include <QThread>
 #include <QTimer>
 
 #include <cstdio>
@@ -79,6 +82,13 @@ int main(int argc, char *argv[])
     //   --vol-probe <appId>      验证「按播放器调音量」的 WASAPI 通路：打印该播放器当前音量、
     //                            试设 30 再读回、然后恢复原值（读不到则恢复成 100），随即退出。
     //                            不启动 App，属于纯命令行工具
+    //   --autostart <on|off|status>
+    //                            直接读写开机自启的注册表项并打印结果，随即退出（不启动 App）。
+    //                            用来核对「设置面板里那个开关」到底往注册表写了什么；
+    //                            status 只读，不会改动系统状态
+    //   --open-dir <data|plugins>
+    //                            走一遍「打开目录」的真实代码路径（托盘菜单 / 设置面板按钮都调它），
+    //                            打印路径与 Shell 的返回值后退出。用于排查「点了没反应」
     //   --media-probe            直接查询系统全局媒体会话（GSMTC），打印会话列表与当前曲目信息，
     //                            用于判断「检测不到歌曲」是应用问题还是系统压根没有会话。
     //                            不带值（写成 --media-probe=1 也认），16s 后强制 _Exit(0)
@@ -94,6 +104,8 @@ int main(int argc, char *argv[])
     QString grabDir;            // --grab 的输出目录；空表示不截图
     QString seqDir;             // --material-seq 的输出目录（--out）
     QString volProbe;           // --vol-probe 的目标播放器 appId；空表示不跑该自检
+    QString autostartProbe;     // --autostart 的动作（on/off/status）；空表示不跑该自检
+    QString openDirProbe;       // --open-dir 的目标（data/plugins）；空表示不跑该自检
     QString mediaProbe;         // --media-probe 的开关标志（非空即启用，内容本身无意义）
     int quitAfterMs = 0;        // --quit-after，单位毫秒；0 表示不自动退出
     int removeAllMs = 0;        // --remove-all，单位毫秒；0 表示不执行
@@ -117,6 +129,10 @@ int main(int argc, char *argv[])
             seqDir = args.at(++i);
         } else if (a == QLatin1String("--vol-probe") && i + 1 < args.size()) {
             volProbe = args.at(++i);
+        } else if (a == QLatin1String("--autostart") && i + 1 < args.size()) {
+            autostartProbe = args.at(++i);
+        } else if (a == QLatin1String("--open-dir") && i + 1 < args.size()) {
+            openDirProbe = args.at(++i);
         } else if (a.startsWith(QLatin1String("--media-probe"))) {
             // 只判前缀：--media-probe / --media-probe=1 都算启用，值一概忽略
             mediaProbe = QStringLiteral("1");
@@ -154,6 +170,42 @@ int main(int argc, char *argv[])
         std::printf("volume(%s): before=%d set30=%d after=%d system=%d\n",
                     qPrintable(volProbe), before, ok ? 1 : 0, after, sysBefore);
         return 0;
+    }
+
+    // 开发自检：直接验证开机自启的注册表读写（和设置面板里那个开关走同一个 setEnabled()）。
+    // 放在 App 之前：不建托盘、不抢单实例锁，纯命令行探针，所以已在运行时也能跑
+    if (!autostartProbe.isEmpty()) {
+        bool ok = true;
+        if (autostartProbe == QLatin1String("on"))
+            ok = Autostart::setEnabled(true);
+        else if (autostartProbe == QLatin1String("off"))
+            ok = Autostart::setEnabled(false);
+        else if (autostartProbe != QLatin1String("status"))
+            ok = false; // 只认 on / off / status，写错就当失败，免得静默什么都不做
+
+        std::printf("autostart: supported=%d enabled=%d ok=%d cmd=%s\n",
+                    Autostart::isSupported() ? 1 : 0,
+                    Autostart::isEnabled() ? 1 : 0,
+                    ok ? 1 : 0,
+                    qUtf8Printable(Autostart::commandLine()));
+        std::fflush(stdout);
+        return ok ? 0 : 1;
+    }
+
+    // 开发自检：验证「打开目录」这条真实调用路径（托盘菜单与设置面板按钮共用 ShellActions::openFolder）
+    if (!openDirProbe.isEmpty()) {
+        const QString dir = (openDirProbe == QLatin1String("plugins"))
+                                ? WidgetRegistry::pluginsDir()
+                                : Paths::dataDir();
+        Paths::ensureDir(dir);
+        const bool ok = ShellActions::openFolder(dir);
+        std::printf("open-dir: path=%s exists=%d shell=%d\n",
+                    qUtf8Printable(dir), QDir(dir).exists() ? 1 : 0, ok ? 1 : 0);
+        std::fflush(stdout);
+        // 探针要活到资源管理器真的把窗口建出来：ShellExecute 是「把请求交给 shell 就返回」，
+        // 进程立刻退出会让异步拉起的窗口跟着消失，看到的就是「返回成功但什么都没打开」
+        QThread::msleep(2500);
+        return ok ? 0 : 1;
     }
 
 #ifdef QDW_HAS_GSMTC

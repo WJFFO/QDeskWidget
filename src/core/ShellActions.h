@@ -45,8 +45,10 @@ void revealInExplorer(const QString &path);          // 资源管理器中定位
 
 /**
  * 打开文件夹
- * @param dir 目录路径；不校验存在性，交给系统处理。
- * @return 同 open()：只表示请求已提交。
+ * @param dir 目录路径；不校验存在性，交给系统处理（Windows 上失败会返回 false）。
+ * @return Windows：ShellExecuteEx 成功即 true，失败退回 explorer.exe；两条路都不行才 false
+ *         （调用方应给出反馈——静默失败是「点了没反应」的来源）。
+ *         其它平台：QDesktopServices::openUrl 的结果，只表示请求已提交。
  */
 bool openFolder(const QString &dir);                 // 打开文件夹
 

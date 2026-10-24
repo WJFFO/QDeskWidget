@@ -133,6 +133,14 @@ private:
     QCheckBox *m_confirmDelete = nullptr;  // 删除文件前是否弹确认框（实际删除始终走回收站）
     QCheckBox *m_snap = nullptr;           // 拖动整理盒松手时是否吸附网格；步长固定用 AppSettings::gridStep，面板不提供调节
     QCheckBox *m_showHidden = nullptr;     // 文件列表是否显示隐藏 / 系统文件
+    /**
+     * 开机自动启动。**不经过 AppSettings**：它的真值在注册表启动项里（见 platform/Autostart.h），
+     * 所以它是「即时动作型」控件——勾上/取消直接读写注册表，不进 applyLive() 的全量回写。
+     * 这样用户在任务管理器里禁用启动项后，下次打开面板看到的状态仍是真实的。
+     */
+    QCheckBox *m_autoStart = nullptr;
+    /** 自启的**错误提示位**（写注册表失败时才显示，平时 setVisible(false) 完全不占版面） */
+    QLabel *m_autoStartHint = nullptr;
 
     QTimer *m_liveTimer = nullptr;         // 滑块拖动期间的合并刷新（33ms 单次）
     QTimer *m_saveTimer = nullptr;         // 停手 350ms 后落盘（单次）
@@ -142,6 +150,5 @@ private:
     // ---- 组件分区 ----
     QComboBox *m_widgetCombo = nullptr;    // 可添加的组件（内置 + 插件）；索引对应填充顺序，取值走 itemData
     QPushButton *m_widgetAdd = nullptr;    // 「添加」按钮；列表为空时禁用
-    QLabel *m_widgetStatus = nullptr;      // 分区下方的反馈文字（可选组件的描述 / 刚添加了什么）
-    QLabel *m_widgetDesc = nullptr;        // 当前选中组件的说明文字
+    QLabel *m_widgetStatus = nullptr;      // 分区下方的反馈文字（可选组件数 / 刚添加了什么）
 };

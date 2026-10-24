@@ -9,6 +9,7 @@
 #include "core/ShellActions.h"
 
 #include <QClipboard>
+#include <QDebug>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
@@ -154,10 +155,41 @@ void revealInExplorer(const QString &path)
 #endif
 }
 
-// 打开文件夹：不做存在性校验，路径不存在时由系统弹自己的错误提示（这里没有 UI 上下文可用）
+// 打开文件夹。
+// 为什么不用 QDesktopServices::openUrl()（以前就是它）：
+//   1) 它把路径包成 file:/// URL 交给 shell，目录不存在的报错和「被别的程序抢了关联」
+//      都只会返回 false，调用处拿不到任何可用信息；
+//   2) **前台权限**：托盘程序自己没有前台窗口，从托盘菜单拉起 explorer 时，
+//      默认规则不允许新窗口抢前台，窗口会开在其它窗口后面/最小化，用户看到的就是
+//      「点了没反应」。这里先调 AllowSetForegroundWindow 把前台权限临时授给被拉起的进程。
+// 仍保留 explorer.exe 兜底：极少数机器上 shell 关联被第三方文件管理器改掉时，
+// 直接调 explorer.exe 还能打开。
 bool openFolder(const QString &dir)
 {
+    if (dir.isEmpty())
+        return false;
+#ifdef Q_OS_WIN
+    const QString native = QDir::toNativeSeparators(dir);
+    // ASFW_ANY：允许接下来被拉起的进程（explorer.exe）把窗口设到前台
+    AllowSetForegroundWindow(ASFW_ANY);
+
+    SHELLEXECUTEINFOW ei = {}; // 必须清零：lpIDList / hProcess 等是出参
+    ei.cbSize = sizeof(ei);
+    // INVOKEIDLIST = 走 shell 命名空间打开（目录语义最稳）；NOASYNC = 等 DDE 交接完成再返回；
+    // FLAG_NO_UI = 不弹系统错误框，失败信息交给调用方
+    ei.fMask = SEE_MASK_INVOKEIDLIST | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+    ei.lpVerb = L"open";
+    ei.lpFile = reinterpret_cast<LPCWSTR>(native.utf16()); // 必须原生分隔符：正斜杠在部分 shell 扩展上会失败
+    ei.nShow = SW_SHOWNORMAL;
+    if (ShellExecuteExW(&ei))
+        return true;
+
+    qWarning("openFolder: ShellExecuteEx 失败（err=%lu），改用 explorer.exe 兜底：%s",
+             GetLastError(), qUtf8Printable(native));
+    return QProcess::startDetached(QStringLiteral("explorer.exe"), { native });
+#else
     return QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+#endif
 }
 
 // 回收站走 SHFileOperationW 而不是 Qt：Qt 没有回收站 API，直接 QFile::remove 是不可恢复的硬删。

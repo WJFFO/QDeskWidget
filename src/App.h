@@ -8,7 +8,8 @@
  *  - 组合关系变化一律走 rebuildWindows() 整体重建（旧窗口 deleteLater），不做增量迁移，
  *    因此调用方不要跨调用缓存 FileBoxWindow*；
  *  - 关窗 ≠ 退出：盒子窗口只是隐藏到托盘，进程靠 setQuitOnLastWindowClosed(false) 常驻；
- *  - 单实例靠 QLocalServer 的命名管道实现，第二个进程只负责把已有实例的窗口叫出来。
+ *  - 单实例分两层：命名互斥体（SingleInstance）判定「能不能启动」，
+ *    QLocalServer 命名管道只负责把已有实例的窗口叫出来——只用管道时探测超时会漏成两个进程。
  */
 #pragma once
 
@@ -43,7 +44,7 @@ public:
 
     /**
      * 启动应用：抢单实例锁 → 加载 boxes.json → 按数据重建全部窗口 → 建托盘。
-     * @return false 表示已有实例在运行（本进程已通知它 show 并应立即退出）；
+     * @return false 表示已有实例在运行（本进程已尽力通知它 show 并应立即退出）；
      *         true  表示本进程成为主实例，可以继续进入事件循环。
      * 副作用：会创建 QLocalServer、读取磁盘配置、创建并 show 出所有盒子窗口。
      */
@@ -105,6 +106,12 @@ public:
 private:
     /** 搭托盘图标与右键菜单（新建整理盒 / 显示隐藏 / 设置 / 退出），并接上单击与双击行为 */
     void buildTray();
+    /**
+     * 唤醒已在运行的实例：连它的命名管道发 "show"，把窗口叫到前台。
+     * 带短重试——对方可能刚抢到互斥体、管道还没 listen 起来（连点两次图标就是这个时序）。
+     * 失败不做任何补救：本进程反正要退出，抢占已有实例的管道反而是破坏。
+     */
+    void notifyExistingInstance();
     /**
      * 为单个宿主盒子创建窗口并接好所有信号。
      * @param cfg 宿主配置；若其 groupMembers 非空，会一并把成员配置塞进窗口

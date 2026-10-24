@@ -14,7 +14,9 @@
 #include "core/BoxManager.h"
 #include "core/Paths.h"
 #include "core/ShellActions.h"
+#include "platform/Autostart.h"
 #include "platform/Platform.h"
+#include "platform/SingleInstance.h"
 #include "ui/FileBoxWindow.h"
 #include "ui/NewBoxDialog.h"
 #include "ui/SettingsDialog.h"
@@ -34,10 +36,20 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QSystemTrayIcon>
+#include <QThread>
 #include <QTimer>
 
 namespace
 {
+/**
+ * 单实例用的键：互斥体名与命名管道名共用同一个串。
+ * 两者必须一致才好排查（任务管理器 / PipeList 里看到的名字能直接对上）。
+ */
+QString instanceKey()
+{
+    return QStringLiteral("QDeskWidget-single-instance");
+}
+
 /**
  * 给弹出菜单套上主题样式：底色、圆角、项内边距、选中色、禁用色、分隔线都取自 AppSettings。
  * @param m 由调用方 new 出来的 QMenu（本函数不接管其生命周期）
@@ -133,24 +145,23 @@ App::App(QObject *parent)
 // 托盘放最后，是因为它引用了 AppSettings 与当前盒子集合，此时数据才算齐。
 bool App::start()
 {
-    // ---- 单实例：已有进程时通知它显示窗口，然后本进程退出 ----
-    const QString key = QStringLiteral("QDeskWidget-single-instance");
-    {
-        QLocalSocket probe;
-        probe.connectToServer(key);
-        // 180ms 只等本地命名管道的握手；真有一实例在跑会立刻连上，等太久只会拖慢冷启动
-        if (probe.waitForConnected(180)) {
-            probe.write("show");
-            probe.flush();
-            probe.waitForBytesWritten(180);
-            return false;
-        }
+    // ---- 单实例：已有进程时通知它显示窗口，然后本进程立刻退出 ----
+    // 两层保护，缺一不可：
+    //   1) 命名互斥体回答「现在到底能不能启动」——由内核维护，进程死亡自动回收，不会误判；
+    //   2) 命名管道只承担「把已有实例的窗口叫出来」这一件事。
+    // 以前只有管道，有个真洞：探活超时（杀软扫描 exe、系统卡顿 180ms 就够）会被当成
+    // 「没有实例在跑」，接着 removeServer() 还会把活着那个实例的管道删掉，
+    // 于是真的跑出两个进程，两份窗口 + 两份 boxes.json 互相覆盖。
+    if (!SingleInstance::acquire(instanceKey())) {
+        notifyExistingInstance();
+        return false;
     }
-    // 上一个进程若被强杀，管道文件会残留、listen 会失败，所以先无条件清一次；
-    // 上面已确认没有活着的实例，此处删除不会误伤
-    QLocalServer::removeServer(key);
+
+    // 抢到锁就说明没有活着的实例了：上一个进程若被强杀，管道可能残留、listen 会失败，
+    // 所以先无条件清一次（此刻不可能误伤，对方已不存在）
+    QLocalServer::removeServer(instanceKey());
     m_server = new QLocalServer(this);
-    if (m_server->listen(key)) {
+    if (m_server->listen(instanceKey())) {
         connect(m_server, &QLocalServer::newConnection, this, [this]
         {
             while (QLocalSocket *sock = m_server->nextPendingConnection()) {
@@ -159,7 +170,14 @@ bool App::start()
                 showAllWindows();
             }
         });
+    } else {
+        // 单实例保证已由互斥体兜住，listen 失败只是「别的进程叫不醒我」，不值得让程序起不来
+        qWarning("single-instance: 命名管道 listen 失败：%s", qUtf8Printable(m_server->errorString()));
     }
+
+    // 便携形态：程序文件夹被移动 / 改名后，开机启动项里还指着旧路径，每次启动顺手校正一次。
+    // 未开启自启时它只是一次注册表读取，成本可忽略
+    Autostart::syncIfEnabled();
 
     m_boxes->load();
 
@@ -172,6 +190,29 @@ bool App::start()
     // 兜底落盘：正常路径的 450ms 防抖可能还没到点就被退出打断
     connect(qApp, &QCoreApplication::aboutToQuit, this, [this] { m_boxes->save(); });
     return true;
+}
+
+// 唤醒已有实例。重试是必要的：用户连点两次图标时，先起的那个进程可能刚拿到互斥体、
+// 命名管道却还没 listen 起来，此时单次 connect 会失败，已有实例就不会把窗口显示出来。
+// 6 次 × (80ms 握手 + 50ms 间隔) ≈ 最坏 780ms，只在「真的有另一个实例」时才会走满，
+// 冷启动路径上是第一次就连上、立即返回。
+void App::notifyExistingInstance()
+{
+    for (int attempt = 0; attempt < 6; ++attempt) {
+        QLocalSocket probe;
+        probe.connectToServer(instanceKey());
+        if (probe.waitForConnected(80)) {
+            probe.write("show");
+            probe.flush();
+            probe.waitForBytesWritten(80);
+            return; // 发出去就够了，不等待回执：本进程马上退出
+        }
+        // 最后一次失败后再睡毫无意义，直接省掉这 50ms
+        if (attempt + 1 < 6)
+            QThread::msleep(50);
+    }
+    // 拿不到互斥体又连不上管道：对方可能卡死在启动阶段。这里什么都不做——
+    // 本进程绝不能去删管道或抢锁，否则就把「只有一个实例」这条保证破坏了
 }
 
 // 建单个宿主窗口：先收集成员配置，再建窗口并接信号。
@@ -375,7 +416,7 @@ void App::deleteLastBoxViaUi()
     });
 }
 
-// 自检用：把每个窗口当前画面存成 PNG，组合窗口额外遍历各成员。
+// 自检用：把每个窗口当前画面存成 PNG，组合窗口额外遍历各成员，设置面板若开着也存一张。
 // 截图前不主动 processEvents / 等待，依赖调用方在窗口稳定后再调（main 里是 5.2s 后）。
 void App::saveSnapshots(const QString &dir)
 {
@@ -394,6 +435,11 @@ void App::saveSnapshots(const QString &dir)
             }
         }
     }
+
+    // 设置面板不是盒子窗口、不在 m_windows 里，单独补一张：
+    // 否则 `--settings --grab` 只拿得到盒子，改面板布局时没法肉眼核对
+    if (m_settings && m_settings->isVisible())
+        m_settings->grab().save(dir + QStringLiteral("/settings.png"));
 }
 
 // 重启单次定时器即完成防抖：450ms 内的连续调用只会落盘一次
@@ -551,7 +597,7 @@ void App::toggleAllWindows()
 }
 
 // 托盘是这个应用唯一的常驻入口：所有窗口关掉后只能靠它把界面叫回来。
-// 菜单结构：新建 → 显示/隐藏 → 设置/数据目录 → 退出，与窗口右键菜单保持同一套术语。
+// 菜单结构：新建 → 显示/隐藏 → 设置 → 退出，与窗口右键菜单保持同一套术语。
 void App::buildTray()
 {
     m_tray = new QSystemTrayIcon(makeAppIcon(), this);
@@ -570,11 +616,6 @@ void App::buildTray()
     menu->addAction(QStringLiteral("隐藏全部整理盒"), this, &App::hideAllWindows);
     menu->addSeparator();
     menu->addAction(QStringLiteral("设置…"), this, &App::openSettings);
-    menu->addAction(QStringLiteral("打开数据目录"), this, []
-    {
-        Paths::ensureDir(Paths::dataDir());
-        ShellActions::openFolder(Paths::dataDir());
-    });
     menu->addSeparator();
     // 退出走 qApp 的 quit：会触发 aboutToQuit → 最后一次 save()
     menu->addAction(QStringLiteral("退出"), qApp, &QApplication::quit);

@@ -22,6 +22,8 @@ qt_add_executable(QDeskWidget
     src/core/ShellActions.h          src/core/ShellActions.cpp
     src/platform/Platform.h          src/platform/Platform.cpp
     src/platform/MediaVolume.h       src/platform/MediaVolume.cpp
+    src/platform/Autostart.h         src/platform/Autostart.cpp
+    src/platform/SingleInstance.h    src/platform/SingleInstance.cpp
     src/ui/FileItemDelegate.h        src/ui/FileItemDelegate.cpp
     src/ui/UiStyle.h
     src/ui/MarqueeLabel.h            src/ui/MarqueeLabel.cpp
