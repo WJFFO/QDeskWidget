@@ -2,7 +2,7 @@
 
 ![QDeskWidget](docs/images/hero.png)
 
-[QDeskWidget] 是一款 C++ / qt6 的 Windows 桌面整理工具。
+QDeskWidget 是一款基于 **Qt 6 / C++** 的 Windows 桌面整理工具，把桌面图标收进一个个真实的文件夹盒子。
 
 - 亚克力 / 云母 / 纯色三种材质，Win11 走 DWM 系统圆角，无边框，不抢任务栏
 - 每个整理盒背后是**一个真实文件夹**（可托管新建，也可关联已有文件夹），桌面文件不被搬走
@@ -164,9 +164,16 @@ plugins/hello-clock/         示例插件（可直接复制改成自己的组件
 resources/weather/           天气图标 SVG（Meteocons line 变体，MIT，见同目录 LICENSE.txt）
 ```
 
+---
+
+## 许可
+
+本项目以 **MIT License** 发布，全文见仓库根目录的 [`LICENSE`](LICENSE)（Copyright © 2026 whnbd）。
+
 **关于与 DeskBox 的关系**：本项目的定位是**独立实现**。它依照
 [DeskBox](https://github.com/Tianyu199509/DeskBox)（C# / WinUI 3）所呈现的功能形态，
-用 **Qt 6 / C++17** 从零实现，**未使用原项目的任何源代码** —— 两者技术栈、代码库与构建体系完全独立，
+用 **Qt 6 / C++20** 从零实现，**未使用原项目的任何源代码** —— 两者技术栈、代码库与构建体系完全独立，
 不存在代码层面的衍生关系。DeskBox 仅作为功能与体验的参照对象；本项目与原作者无隶属关系，亦未获其背书。
 
 天气图标来自 [Meteocons](https://github.com/basmilius/weather-icons)（Copyright © 2020-present Bas Milius，MIT），
+许可证原文见 `resources/weather/LICENSE.txt`，随程序一起分发即可。
