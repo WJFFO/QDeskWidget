@@ -35,6 +35,9 @@ QDeskWidget/
 *.pro.user
 *.qmlproject.user
 
+# ---------- 产品官网（本地维护，不入库） ----------
+website/
+
 # ---------- 内部工作区（会话记忆、设计画布） ----------
 .workbuddy/
 *.miora
